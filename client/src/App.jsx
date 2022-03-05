@@ -20,11 +20,12 @@ function App() {
   const [videMeta, setVideoMeta] = useState(null);
   const [canPlay, setCanPlay] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0.0);
   const [volume, setVolume] = useState(0.5);
   const [loop, setLoop] = useState(null);
   const [volumeSliderShow, setVolumeSliderShow] = useState(false);
   const audioRef = useRef(null);
+  const [selectingVolume,setSelectingVolume] = useState(false)
 
   const BASE_URL = "http://localhost:8000";
 
@@ -47,24 +48,42 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (audioRef.current !== null) audioRef.current.volume = volume;
-  }, [volume]);
-
-  useEffect(() => {
     resetSong();
   }, [data]);
 
-  useEffect(() => {
-    isPlaying
-      ? setLoop(setInterval(() => setCurrentTime((prev) => prev + 1), 1000))
-      : clearInterval(loop);
-    return () => clearInterval(loop);
-  }, [isPlaying]);
+  const setupLoop = (startingNumber = 0) => {
+    setCurrentTime(startingNumber);
+    setLoop(setInterval(() => setCurrentTime((prev) => prev + 1), 1000));
+  };
+
+  const skipFiveSeconds = () => {
+    if (currentTime < audioRef.current.duration - 5) {
+      clearInterval(loop);
+      audioRef.current.currentTime = audioRef.current.currentTime + 5;
+      setupLoop(audioRef.current.currentTime);
+    } else {
+      clearInterval(loop);
+      audioRef.current.currentTime = audioRef.current.duration;
+      resetSong();
+    }
+  };
+
+  const rewindFiveSeconds = () => {
+    if (audioRef.current.currentTime > 5) {
+      clearInterval(loop);
+      audioRef.current.currentTime = audioRef.current.currentTime - 5;
+      setupLoop(audioRef.current.currentTime);
+    } else {
+      clearInterval(loop);
+      audioRef.current.currentTime = 0;
+      setupLoop(audioRef.current.currentTime);
+    }
+  };
 
   const resetSong = () => {
     setCurrentTime(0);
-    setCanPlay(false);
     setIsPlaying(false);
+    clearInterval(loop);
   };
 
   return (
@@ -94,6 +113,15 @@ function App() {
                   ref={audioRef}
                   src={videMeta.url}
                   onCanPlay={() => setCanPlay(true)}
+                  onEnded={() => resetSong()}
+                  onPlay={(e) => {
+                    setupLoop();
+                    setIsPlaying(true);
+                  }}
+                  onPause={(e) => {
+                    clearInterval(loop);
+                    setIsPlaying(false);
+                  }}
                 ></video>
               </>
             ) : null}
@@ -126,11 +154,18 @@ function App() {
                     className={`bardo__body-volume-slider ${
                       volumeSliderShow ? "show" : "hide"
                     }`}
-                    style={{
-                      height: volume * 100 + "%",
-                    }}
+                    onMouseDown={()=>setSelectingVolume(true)}
+                    onMouseMove={() => selectingVolume ? :null}
+                    onMouseUp={()=>setSelectingVolume(false)}
                   >
-                    <p>{volume * 100}</p>
+                    {/* <input
+                      type="range"
+                      onChange={(e) => {
+                        audioRef.current.volume = e.target.value / 100;
+                        setVolume(e.target.value / 100);
+                      }}
+                    /> */}
+                    {/* <p>{parseInt(volume * 100)}</p> */}
                   </div>
                 )}
               </div>
@@ -151,6 +186,7 @@ function App() {
             <Card.Footer className="bardo__footer">
               <div className="bardo__footer-controls">
                 <svg
+                  onClick={() => rewindFiveSeconds()}
                   width="24"
                   height="24"
                   viewBox="0 0 24 24"
@@ -191,10 +227,8 @@ function App() {
                     if (canPlay) {
                       if (audioRef.current.paused) {
                         audioRef.current.play();
-                        setIsPlaying(true);
                       } else {
                         audioRef.current.pause();
-                        setIsPlaying(false);
                       }
                     }
                   }}
@@ -257,6 +291,7 @@ function App() {
                   viewBox="0 0 24 24"
                   fill="none"
                   xmlns="http://www.w3.org/2000/svg"
+                  onClick={() => skipFiveSeconds()}
                   className="nextui-c-PJLV nextui-c-PJLV-igsmDXe-css svg-icon"
                 >
                   <path
@@ -277,12 +312,8 @@ function App() {
         <div
           className="bardo__footer-progress"
           style={{
-            width: "402px",
-            height: "674px",
-            transform: `translate3d(${
-              -100 + (currentTime / audioRef.current.duration) * 100
-            }%, 0, 0)`,
-            zIndex: 0,
+            height: ` ${(currentTime / audioRef.current.duration) * 100}%`,
+            width: ` ${(currentTime / audioRef.current.duration) * 100}%`,
           }}
           color="secondary"
         ></div>
