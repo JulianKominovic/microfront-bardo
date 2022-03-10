@@ -1,12 +1,8 @@
 import "./App.css";
 import { Card, Avatar, Text, Button } from "@nextui-org/react";
-import {
-  NextUIProvider,
-  createTheme,
-  Loading,
-  Progress,
-} from "@nextui-org/react";
-import { useEffect, useState, useRef } from "react";
+import { NextUIProvider, createTheme, Loading } from "@nextui-org/react";
+import React, { useEffect, useState, useRef } from "react";
+import { useSwipeable } from "react-swipeable";
 const darkTheme = createTheme({
   type: "dark",
 });
@@ -21,39 +17,94 @@ function App() {
   const [canPlay, setCanPlay] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0.0);
-  const [volume, setVolume] = useState(0.5);
   const [loop, setLoop] = useState(null);
-  const [volumeSliderShow, setVolumeSliderShow] = useState(false);
   const audioRef = useRef(null);
-  const [selectingVolume,setSelectingVolume] = useState(false)
+  const [volumeSliderHeight, setVolumeSliderHeight] = useState(0);
+  const [authBardo, setAuthBardo] = useState(false);
 
   const BASE_URL = "http://localhost:8000";
 
-  useEffect(() => {
-    fetch(BASE_URL + "/get")
-      .then((res) => res.json())
-      .then((respo) => {
-        const random = randomIntFromInterval(0, respo.tracks.length - 1);
-        setData(respo.tracks[random]);
-        fetch(BASE_URL + "/play/" + respo.tracks[random].videoId)
-          .then((res) => res.json())
-          .then(({ _ydl_info }) =>
-            setVideoMeta({
-              thumb: _ydl_info.thumbnails[_ydl_info.thumbnails.length - 1].url,
-              url: _ydl_info.requested_formats.find((e) => e.fps === null).url,
-            })
-          );
-      })
-      .catch((err) => console.log(err));
-  }, []);
+  const handlers = useSwipeable({
+    onSwiping: (e) => {
+      // HIGHER IS LESS SENSIBILITY
+      const sensibility = 600;
+      if (e.deltaY === 0) return;
+      if (e.dir === "Up") {
+        audioRef.current.volume =
+          audioRef.current.volume - e.deltaY / sensibility <= 1
+            ? audioRef.current.volume - e.deltaY / sensibility
+            : 1.0;
+      } else {
+        audioRef.current.volume =
+          audioRef.current.volume - e.deltaY / sensibility >= 0
+            ? audioRef.current.volume - e.deltaY / sensibility
+            : 0;
+      }
 
-  useEffect(() => {
-    resetSong();
-  }, [data]);
+      setVolumeSliderHeight(audioRef.current.volume);
+    },
+  });
+
+  const handleVolumeScroll = (ev) => {
+    if (audioRef.current === null) return;
+    if (ev.deltaY > 0) {
+      audioRef.current.volume =
+        audioRef.current.volume >= 0.03 ? audioRef.current.volume - 0.03 : 0;
+    } else {
+      audioRef.current.volume =
+        audioRef.current.volume <= 0.97 ? audioRef.current.volume + 0.03 : 1.0;
+    }
+    setVolumeSliderHeight(audioRef.current.volume);
+  };
+
+  const fetchData = async () => {
+    const response = await fetch(BASE_URL + "/get")
+      .then((res) => res.json())
+      .catch(() => () => {
+        console.log(
+          "Ha ocurrido un error al cargar la musica. Intentando de nuevo..."
+        );
+        fetchData();
+      });
+    const random = randomIntFromInterval(0, response.tracks.length - 1);
+    setData(response.tracks[random]);
+    return await fetch(BASE_URL + "/play/" + response.tracks[random].videoId)
+      .then((res) => res.json())
+      .then(({ _ydl_info }) =>
+        setVideoMeta({
+          thumb: _ydl_info.thumbnails[_ydl_info.thumbnails.length - 1].url,
+          url: _ydl_info.requested_formats.find((e) => e.fps === null).url,
+        })
+      )
+      .catch(() => {
+        console.log(
+          "Ha ocurrido un error al cargar la musica. Intentando de nuevo..."
+        );
+        fetchData();
+      });
+  };
 
   const setupLoop = (startingNumber = 0) => {
     setCurrentTime(startingNumber);
     setLoop(setInterval(() => setCurrentTime((prev) => prev + 1), 1000));
+  };
+
+  const handlePause = () => {
+    clearInterval(loop);
+    setIsPlaying(false);
+  };
+
+  const handlePlay = (e) => {
+    setupLoop(audioRef.current.currentTime);
+    setIsPlaying(true);
+    setAuthBardo(true);
+  };
+
+  const resetSong = () => {
+    setIsPlaying(false);
+    setCanPlay(false);
+    clearInterval(loop);
+    setCurrentTime(0);
   };
 
   const skipFiveSeconds = () => {
@@ -80,11 +131,23 @@ function App() {
     }
   };
 
-  const resetSong = () => {
-    setCurrentTime(0);
-    setIsPlaying(false);
-    clearInterval(loop);
+  const changeSong = () => {
+    handlePause();
+    fetchData().then(() => {
+      resetSong();
+      if (authBardo && canPlay) {
+        audioRef.current.play();
+      }
+    });
   };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  useEffect(() => {
+    resetSong();
+  }, [data]);
 
   return (
     <NextUIProvider theme={darkTheme}>
@@ -95,6 +158,7 @@ function App() {
           position: "relative",
           overflow: "visible",
           borderRadius: "$sm",
+          justifyContent: "space-between",
         }}
         className="bardo__card"
       >
@@ -112,36 +176,38 @@ function App() {
                   style={{ display: "none" }}
                   ref={audioRef}
                   src={videMeta.url}
-                  onCanPlay={() => setCanPlay(true)}
-                  onEnded={() => resetSong()}
-                  onPlay={(e) => {
-                    setupLoop();
-                    setIsPlaying(true);
+                  onCanPlay={() => {
+                    audioRef.current.volume = 0.5;
+                    setVolumeSliderHeight(audioRef.current.volume);
+                    setCanPlay(true);
                   }}
-                  onPause={(e) => {
-                    clearInterval(loop);
-                    setIsPlaying(false);
-                  }}
+                  onEnded={resetSong}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
                 ></video>
               </>
             ) : null}
+
             <Card.Body
+              onWheel={handleVolumeScroll}
               className="bardo__body"
+              {...handlers}
               css={{
                 position: "absolute",
-                zIndex: 2,
-                top: 5,
+                zIndex: 3,
+
                 w: "100%",
                 padding: 0,
               }}
             >
-              <div
-                className="bardo__body-avatar-container"
-                onMouseEnter={() => setVolumeSliderShow(true)}
-                onMouseLeave={() => setVolumeSliderShow(false)}
-              >
+              <div className="bardo__body-avatar-container">
                 <Avatar
-                  style={{ width: 120, height: 120 }}
+                  style={{
+                    width: 120,
+                    height: 120,
+                    position: "relative",
+                    zIndex: 4,
+                  }}
                   size="xl"
                   src={data.thumbnails[1].url}
                   color="gradient"
@@ -149,41 +215,34 @@ function App() {
                   className="bardo__body-avatar"
                   draggable="false"
                 />
-                {audioRef.current !== null && (
-                  <div
-                    className={`bardo__body-volume-slider ${
-                      volumeSliderShow ? "show" : "hide"
-                    }`}
-                    onMouseDown={()=>setSelectingVolume(true)}
-                    onMouseMove={() => selectingVolume ? :null}
-                    onMouseUp={()=>setSelectingVolume(false)}
-                  >
-                    {/* <input
-                      type="range"
-                      onChange={(e) => {
-                        audioRef.current.volume = e.target.value / 100;
-                        setVolume(e.target.value / 100);
-                      }}
-                    /> */}
-                    {/* <p>{parseInt(volume * 100)}</p> */}
-                  </div>
-                )}
               </div>
               <Text
                 h1
                 size={30}
                 css={{
                   textGradient: "45deg, $blue500 -20%, $pink500 50%",
+                  position: "relative",
+                  zIndex: 4,
                 }}
                 weight="bold"
               >
                 {data.title}
               </Text>
-              <Text h1 size={16} weight="normal">
+              <Text
+                h1
+                size={16}
+                weight="normal"
+                style={{ position: "relative", zIndex: 4 }}
+              >
                 {data.artists[0].name}
               </Text>
             </Card.Body>
-            <Card.Footer className="bardo__footer">
+            <Card.Footer
+              className="bardo__footer"
+              style={{
+                marginTop: `${!data || !videMeta ? "511px" : "0px"}`,
+              }}
+            >
               <div className="bardo__footer-controls">
                 <svg
                   onClick={() => rewindFiveSeconds()}
@@ -211,6 +270,7 @@ function App() {
                   fill="none"
                   xmlns="http://www.w3.org/2000/svg"
                   className="nextui-c-PJLV nextui-c-PJLV-igsmDXe-css svg-icon"
+                  onClick={changeSong}
                 >
                   <path
                     d="M17.69 20.09c-.57 0-1.13-.15-1.65-.45l-8.29-4.78A3.284 3.284 0 0 1 6.1 12c0-1.19.62-2.26 1.65-2.86l8.29-4.78c1.03-.6 2.26-.6 3.3 0s1.65 1.66 1.65 2.86v9.57c0 1.19-.62 2.26-1.65 2.86-.52.29-1.08.44-1.65.44Zm0-14.68c-.31 0-.62.08-.9.24L8.5 10.43c-.56.33-.9.91-.9 1.56s.34 1.23.9 1.56l8.29 4.78c.56.33 1.24.33 1.8 0s.9-.91.9-1.56V7.2c0-.65-.34-1.23-.9-1.56-.28-.14-.59-.23-.9-.23ZM3.76 18.93c-.41 0-.75-.34-.75-.75V5.82c0-.41.34-.75.75-.75s.75.34.75.75v12.36c0 .41-.34.75-.75.75Z"
@@ -278,6 +338,7 @@ function App() {
                   fill="none"
                   xmlns="http://www.w3.org/2000/svg"
                   className="nextui-c-PJLV nextui-c-PJLV-igsmDXe-css svg-icon"
+                  onClick={changeSong}
                 >
                   <path
                     d="M6.31 20.09c-.57 0-1.13-.15-1.65-.45a3.252 3.252 0 0 1-1.65-2.86V7.21c0-1.19.62-2.26 1.65-2.86 1.04-.6 2.27-.6 3.3 0l8.29 4.78c1.03.6 1.65 1.67 1.65 2.86s-.62 2.26-1.65 2.86l-8.29 4.78c-.52.31-1.08.46-1.65.46Zm0-14.68a1.797 1.797 0 0 0-1.8 1.8v9.57c0 .65.34 1.23.9 1.56.56.32 1.24.33 1.8 0l8.29-4.78c.56-.33.9-.91.9-1.56s-.34-1.23-.9-1.56L7.21 5.66c-.28-.16-.59-.25-.9-.25ZM20.24 18.93c-.41 0-.75-.34-.75-.75V5.82c0-.41.34-.75.75-.75s.75.34.75.75v12.36c0 .41-.33.75-.75.75Z"
@@ -307,6 +368,12 @@ function App() {
             </Card.Footer>
           </>
         ) : null}
+        <div
+          className="bardo__backdrop"
+          style={{
+            backdropFilter: `blur(10px) saturate(${volumeSliderHeight * 2})`,
+          }}
+        ></div>
       </Card>
       {audioRef.current !== null ? (
         <div
